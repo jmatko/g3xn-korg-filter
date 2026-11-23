@@ -38,9 +38,11 @@ if (fs.existsSync(zd2Path)) {
   console.log('  SKIP ZD2 header (file not found)');
 }
 
-// 4. fromU35 (35-bit little-endian)
-t('fromU35([0,0,0,0,1])=128^4', P.fromU35(new Uint8Array([0, 0, 0, 0, 1])) === Math.pow(128, 4));
-t('fromU35([5,2,0,0,0])=261', P.fromU35(new Uint8Array([5, 2, 0, 0, 0])) === 261);
+// 4. fromU35 (disk-usage value, verified on real G3Xn reply)
+//    max bytes 08 00 02 51 24  ->  0x2451020008 = 155977908232
+t('fromU35 disk-max = 155977908232', P.fromU35(new Uint8Array([0x08, 0x00, 0x02, 0x51, 0x24])) === 155977908232);
+t('fromU35 avail = 3', P.fromU35(new Uint8Array([0x03, 0x00, 0x00, 0x00, 0x00])) === 3);
+t('fromU35([5,2,0,0,0])=517', P.fromU35(new Uint8Array([5, 2, 0, 0, 0])) === (5 | (2 << 8)));
 
 // 5. SysEx frame round-trip
 const body = new Uint8Array([0x60, 0x05, 0x00]);

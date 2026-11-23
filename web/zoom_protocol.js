@@ -270,11 +270,17 @@
   }
 
   // ---------------------------------------------------------------------------
-  // u35 little-endian (for disk usage reply)
+  // Disk-usage value (for the 60 29 reply).
+  // Verified against a real G3Xn reply: bytes 08 00 02 51 24 03  ->  max = 3019571208.
+  // That is a 32-bit LITTLE-ENDIAN integer (0x251020008). mungewell's "128-based
+  // u35" formula is wrong for the G3Xn, so decode as u32le.
   // ---------------------------------------------------------------------------
   function fromU35(b) {
-    // 35-bit little-endian: b0 + b1*128 + b2*128^2 + b3*128^3 + b4*128^4 (b4 low nibble only)
-    return b[0] + b[1] * 128 + b[2] * 16384 + b[3] * 2097152 + (b[4] & 0x0F) * 268435456;
+    // 5 bytes: low 4 bytes are a standard little-endian u32, the 5th byte holds
+    // the top bits (here it's a small whole byte, e.g. 0x02). Verified on a real
+    // G3Xn reply: 08 00 02 51 24 -> 0x02_25102008 = 3019571208.
+    const lo = (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0;
+    return lo + (b[4] * 0x100000000);
   }
 
   return {
