@@ -34,24 +34,27 @@ PORT_PREFIX = "ZOOM G"
 
 
 def pack7(data: bytes) -> bytes:
-    """Pack bytes into 7-bit groups (MSB first), padding the final group."""
+    """8-bit bytes -> MIDI-safe 7-bit groups: one high-bits byte, then up to 7 bytes.
+    (high-bit-byte scheme; matches cwoodard g3xn/protocol.py and mungewell pack())."""
     out = bytearray()
     for i in range(0, len(data), 7):
         chunk = data[i:i + 7]
-        byte = 0
-        for b in chunk:
-            byte = (byte << 1) | (b & 0x7F)
-        for _ in range(7 - len(chunk)):
-            byte <<= 1
-        out.append(byte & 0xFF)
+        high = 0
+        for j, b in enumerate(chunk):
+            if b & 0x80:
+                high |= 0x40 >> j
+        out.append(high)
+        out.extend(b & 0x7F for b in chunk)
     return bytes(out)
 
 
 def unpack7(packed: bytes) -> bytes:
+    """Inverse of pack7 (high-bit-byte scheme)."""
     out = bytearray()
-    for byte in packed:
-        for i in range(7, 0, -1):
-            out.append((byte >> (i - 1)) & 0x7F)
+    for i in range(0, len(packed), 8):
+        high = packed[i]
+        for j, b in enumerate(packed[i + 1:i + 8]):
+            out.append(b | 0x80 if high & (0x40 >> j) else b)
     return bytes(out)
 
 

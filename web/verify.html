@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>G3Xn Upload Verify</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181c24; --fg:#e6e9ef; --dim:#8b93a1; --ok:#3fb950; --err:#f85149; --accent:#4d8dff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+  .wrap { max-width:900px; margin:0 auto; padding:20px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:18px; }
+  .card { background:var(--panel); border:1px solid #262c38; border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:#2a3140; }
+  button.danger { background:var(--err); }
+  select { background:#0f1319; color:var(--fg); border:1px solid #2a3140; border-radius:8px; padding:8px; }
+  .status { font-weight:600; }
+  .ok { color:var(--ok); } .err { color:var(--err); } .dim { color:var(--dim); }
+  #filelist { max-height:220px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; background:#0b0e13; border-radius:8px; padding:10px; }
+  #filelist div { padding:2px 4px; }
+  #filelist .hit { background:#1c2b1c; color:var(--ok); }
+  #log { max-height:200px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11.5px; background:#0b0e13; border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-all; }
+  .kv { display:grid; grid-template-columns:120px 1fr; gap:4px 12px; font-size:13px; }
+  .kv span:first-child { color:var(--dim); }
+  .big { font-size:15px; font-weight:700; }
+  hr { border:0; border-top:1px solid #262c38; margin:12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>G3Xn Upload Verify</h1>
+  <div class="sub">Read back the Traveler filter that was just uploaded. Connect the pedal, then run the checks. (Read-only — this page never writes.)</div>
+
+  <div class="card">
+    <div class="row">
+      <button id="connect">Connect</button>
+      <select id="port" style="min-width:220px"><option>— not connected —</option></select>
+      <span id="conn" class="status dim">disconnected</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="list" disabled>1 · List files</button>
+      <button id="download" disabled>2 · Download XXTRVL.ZD2</button>
+      <button id="verify" disabled>3 · Verify upload</button>
+      <button id="disk" class="ghost" disabled>Disk usage</button>
+    </div>
+    <div id="filelist" class="dim" style="margin-top:12px">file list appears here</div>
+    <div id="result" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="dim">SysEx log</span>
+      <button id="copylog" class="ghost" style="margin-left:auto">Copy log</button>
+      <button id="clearlog" class="ghost">Clear</button>
+    </div>
+    <div id="log" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<script src="zoom_protocol.js"></script>
+<script>
+"use strict";
+const P = window.ZoomProtocol;
+let midi = null, port = null;
+const logEl = document.getElementById('log');
+const resultEl = document.getElementById('result');
+const filelistEl = document.getElementById('filelist');
+
+function log(s){ logEl.textContent += s + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+function $(id){ return document.getElementById(id); }
+function setConn(s, cls){ const e=$('conn'); e.textContent=s; e.className='status '+(cls||'dim'); }
+
+// ---- WebMIDI transport: strictly request/response ----
+let pendingResolve = null;
+function onMidi(e){
+  const d = e.data; // Uint8Array
+  log('< ' + Array.from(d.slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join(' ') + (d.length>16?' …':''));
+  const body = P.parseSysEx(d);
+  if(body && body[0] === 0x60 && pendingResolve){
+    const r = pendingResolve; pendingResolve = null;
+    r(body);
+  }
+}
+function request(body, timeout=4000){
+  return new Promise((resolve, reject)=>{
+    if(!port) return reject(new Error('not connected'));
+    const msg = P.buildSysEx(body);
+    log('> ' + Array.from(msg.slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join(' ') + (msg.length>16?' …':''));
+    const to = setTimeout(()=>{ pendingResolve=null; reject(new Error('timeout')); }, timeout);
+    pendingResolve = (b)=>{ clearTimeout(to); resolve(b); };
+    try { port.send(msg); } catch(err){ clearTimeout(to); pendingResolve=null; reject(err); }
+  });
+}
+
+// ---- File READ protocol (G3Xn-verified) ----
+async function listFiles(){
+  const names = [];
+  // first
+  let r = await request(new Uint8Array([0x60,0x25,0x00,0x00,0x2A,0x00]));
+  let guard = 0;
+  while(r && r[4]===0x04 && guard++ < 400){
+    const name = new TextDecoder().decode(r.slice(10, r.length-1)).replace(/\0+$/,'');
+    if(!name) break;
+    names.push(name);
+    r = await request(new Uint8Array([0x60,0x26,0x00,0x00,0x2A,0x00]));
+  }
+  await request(new Uint8Array([0x60,0x27])).catch(()=>{});
+  return names;
+}
+
+async function downloadFile(name){
+  const c = new TextEncoder().encode(name + '\x00');
+  // check exists
+  await request(new Uint8Array([0x60,0x25,0x00,0x00, ...c])).catch(()=>{});
+  const st = await request(new Uint8Array([0x60,0x05,0x00]));
+  // open for read (mode 0x02)
+  await request(new Uint8Array([0x60,0x20,0x02,0,0,0,0,0,0,0,0,0, ...c]));
+  const data = new Uint8Array();
+  const chunks = [];
+  let guard = 0;
+  while(guard++ < 5000){
+    await request(new Uint8Array([0x60,0x05,0x00]));
+    await request(new Uint8Array([0x60,0x22,0x14,0x2F,0x60,0x00,0x0C,0x00,0x04,0x00,0x00,0x00]));
+    const r = await request(new Uint8Array([0x60,0x05,0x00]));
+    if(!r || r[4]!==0x04) break;
+    const n = (r[9]<<7) | r[8];
+    if(n===0) break;
+    const packed = r.slice(10, 10+n+Math.ceil(n/7));
+    const raw = P.unpack7(packed, n);
+    chunks.push(raw);
+  }
+  await request(new Uint8Array([0x60,0x21,0x40,0x00,0x00,0x00,0x00])).catch(()=>{});
+  await request(new Uint8Array([0x60,0x09])).catch(()=>{});
+  let total = chunks.reduce((s,c)=>s+c.length,0);
+  const out = new Uint8Array(total);
+  let off=0; for(const c of chunks){ out.set(c,off); off+=c.length; }
+  return out;
+}
+
+// ---- UI wiring ----
+$('connect').onclick = async ()=>{
+  try{
+    midi = await navigator.requestMIDIAccess({sysex:true, sysexAccess:true});
+    const out = [...midi.outputs.values()].find(o=>/ZOOM/i.test(o.name)) || [...midi.outputs.values()][0];
+    const inp = [...midi.inputs.values()].find(i=>/ZOOM/i.test(i.name)) || [...midi.inputs.values()][0];
+    if(!out) throw new Error('no ZOOM output found');
+    const sel = $('port'); sel.innerHTML='';
+    for(const o of midi.outputs.values()){
+      const opt=document.createElement('option'); opt.value=o.id; opt.textContent=o.name+(o.id===out.id?'  ✓':''); sel.appendChild(opt);
+    }
+    sel.value = out.id;
+    port = out;
+    if(inp) inp.onmidimessage = onMidi;
+    // also listen on output in case replies come back on the same port
+    out.onmidimessage = onMidi;
+    setConn('connected: '+out.name, 'ok');
+    ['list','download','verify','disk'].forEach(id=>$(id).disabled=false);
+    log('connected to ' + out.name);
+  }catch(e){ setConn('error: '+e.message, 'err'); log('connect error: '+e.message); }
+};
+
+$('list').onclick = async ()=>{
+  try{
+    filelistEl.innerHTML=''; filelistEl.className='dim';
+    const names = await listFiles();
+    names.forEach(n=>{
+      const d=document.createElement('div'); d.textContent=n;
+      if(n==='XXTRVL.ZD2'){ d.className='hit'; d.textContent='★ '+n; }
+      filelistEl.appendChild(d);
+    });
+    filelistEl.className='';
+    $('result').innerHTML = `<div class="big ${names.includes('XXTRVL.ZD2')?'ok':'err'}">${names.includes('XXTRVL.ZD2')?'✔ XXTRVL.ZD2 present':'✘ XXTRVL.ZD2 NOT found'}</div>`;
+    log('listed '+names.length+' files');
+  }catch(e){ log('list error: '+e.message); $('result').innerHTML=`<span class="err">error: ${e.message}</span>`; }
+};
+
+$('download').onclick = async ()=>{
+  try{
+    log('downloading XXTRVL.ZD2 …');
+    const data = await downloadFile('XXTRVL.ZD2');
+    window._downloaded = data;
+    const h = P.parseZd2Header(data);
+    $('result').innerHTML = h
+      ? `<div class="kv">
+          <span>size</span><span>${data.length} bytes</span>
+          <span>name</span><span>${h.name}</span>
+          <span>group</span><span>0x${h.group.toString(16).padStart(2,'0')} (${h.groupname})</span>
+          <span>id</span><span>0x${h.id.toString(16).padStart(8,'0')}</span>
+          <span>target</span><span>0x${h.target.toString(16).padStart(2,'0')}</span>
+          <span>version</span><span>${h.version}</span>
+         </div>`
+      : `<span class="err">downloaded ${data.length} bytes but it is not a valid ZD2 (magic mismatch)</span>`;
+    log('downloaded '+data.length+' bytes');
+  }catch(e){ log('download error: '+e.message); }
+};
+
+$('verify').onclick = async ()=>{
+  try{
+    if(!window._downloaded){ log('download first'); return; }
+    const got = window._downloaded;
+    // expected: load the local file if served, else compare size + header
+    let ok, detail;
+    if(window._expected){
+      const a = got, b = window._expected;
+      ok = a.length===b.length;
+      let firstDiff = -1;
+      if(ok){ for(let i=0;i<a.length;i++){ if(a[i]!==b[i]){ firstDiff=i; ok=false; break; } } }
+      detail = ok ? `byte-identical (${a.length} bytes)` : (firstDiff>=0?`size ok but differ at byte ${firstDiff}`:`size mismatch got ${a.length} vs ${b.length}`);
+    } else {
+      const h = P.parseZd2Header(got);
+      ok = h && h.name==='Traveler' && h.group===0x02 && (h.id>>>0)===0x02001010 && got.length===8017;
+      detail = ok
+        ? `header matches (Traveler, group 0x02, id 0x02001010, 8017 B)`
+        : `header mismatch: ${JSON.stringify(h)}`;
+    }
+    $('result').innerHTML = `<div class="big ${ok?'ok':'err'}">${ok?'✔ UPLOAD VERIFIED — Traveler filter is on the pedal':'✘ VERIFY FAILED'}</div><div class="dim" style="margin-top:6px">${detail}</div>`;
+    log('verify: '+(ok?'PASS':'FAIL')+' — '+detail);
+  }catch(e){ log('verify error: '+e.message); }
+};
+
+$('disk').onclick = async ()=>{
+  try{
+    const r = await request(new Uint8Array([0x60,0x29,0x00,0x00,0x00,0x00,0x00]));
+    const max = P.fromU35(r.slice(10,15)), avail = P.fromU35(r.slice(15,20));
+    $('result').innerHTML = `<div class="kv"><span>disk max</span><span>${max} B</span><span>available</span><span>${avail} B</span><span>used</span><span>${((1-avail/max)*100).toFixed(1)}%</span></div>`;
+  }catch(e){ log('disk error: '+e.message); }
+};
+
+$('copylog').onclick = ()=>{ navigator.clipboard.writeText(logEl.textContent); };
+$('clearlog').onclick = ()=>{ logEl.textContent=''; };
+</script>
+</body>
+</html>
