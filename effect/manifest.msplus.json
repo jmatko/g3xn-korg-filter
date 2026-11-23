@@ -1,0 +1,43 @@
+{
+  "name": "Traveler",
+  "filename": "XXTRVL",
+  "id": "07001010",
+  "version": "1.00",
+  "display": "TRAVELER",
+  "badge": "SH",
+  "description": "Resonant low-pass filter emulating the Korg AX1500G / Keio Traveler F-1 (MS20-style VCF). Expression pedal sweeps the cutoff; an optional LFO adds the classic 'traveler' wobble.",
+  "dspload": 14,
+  "kernel": "traveler.c",
+  "state_bytes": 32,
+  "scaffold": "cleanroom",
+  "kernel_section": "text",
+  "allow_stack": true,
+  "opt_for_space": null,
+  "opt_level": 2,
+  "params": [
+    {
+      "name": "Cutoff",
+      "max": 100,
+      "default": 50,
+      "explanation": "Base cutoff frequency, 60 Hz (0) to 8 kHz (100), log scale. Assign the expression pedal to this knob to sweep it."
+    },
+    {
+      "name": "Res",
+      "max": 100,
+      "default": 25,
+      "explanation": "Resonance. Higher = peakier, more MS20-style ring at the cutoff."
+    },
+    {
+      "name": "Sweep",
+      "max": 100,
+      "default": 0,
+      "explanation": "LFO depth added to the cutoff (0 = none, 100 = +/-2500 Hz). The 'traveler' wobble."
+    },
+    {
+      "name": "Rate",
+      "max": 100,
+      "default": 25,
+      "explanation": "LFO rate, 0.05 Hz (0) to 8 Hz (100)."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# The large toolchain + compiler are NOT in this repo (fetch them separately,
+# see README). Ignore them if cloned here.
+/stomphacks/
+/ti-cgt-c6000/
+
+# Build artifacts
+__pycache__/
+*.pyc
+.venv/
+
+# Local dumps / scratch
+dump/
+*.log
