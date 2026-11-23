@@ -50,7 +50,11 @@
       <button id="verify" disabled>3 · Verify upload</button>
       <button id="disk" class="ghost" disabled>Disk usage</button>
     </div>
-    <div id="filelist" class="dim" style="margin-top:12px">file list appears here</div>
+    <div class="row" style="margin-top:10px">
+      <button id="delselected" class="danger" disabled>Delete selected</button>
+      <label class="dim" style="font-size:12.5px"><input type="checkbox" id="delsafe" checked> protect stock/system files (never delete *.ZT2, FLST_SEQ, *.ZIR, *.ZIC)</label>
+    </div>
+    <div id="filelist" class="dim" style="margin-top:12px">file list appears here — check the boxes to select, then Delete selected</div>
     <div id="result" style="margin-top:12px"></div>
   </div>
 
@@ -132,6 +136,15 @@ async function fileExists(name){
   return !!(st && st[0]===0x60 && st[1]===0x05 && st[2]===0x00);
 }
 
+// Delete a file: mungewell file_delete = 60 24 <name cstr> (same header as create;
+// with an existing name it removes it). Returns the raw status reply body.
+async function deleteFile(name){
+  const c = new TextEncoder().encode(name + '\x00');
+  const r = await request(new Uint8Array([0x60,0x24, ...c]));
+  // status: 60 04 .. = ok, 60 03 .. = rejected
+  return r;
+}
+
 async function downloadFile(name){
   const c = new TextEncoder().encode(name + '\x00');
   if(!await fileExists(name)) throw new Error('file not found on pedal: '+name);
@@ -174,24 +187,60 @@ $('connect').onclick = async ()=>{
     // also listen on output in case replies come back on the same port
     out.onmidimessage = onMidi;
     setConn('connected: '+out.name, 'ok');
-    ['list','download','verify','disk'].forEach(id=>$(id).disabled=false);
+    ['list','download','verify','disk','delselected'].forEach(id=>$(id).disabled=false);
     log('connected to ' + out.name);
   }catch(e){ setConn('error: '+e.message, 'err'); log('connect error: '+e.message); }
 };
+
+// System/stock files that must never be deleted (deleting these can brick the pedal).
+function isProtected(n){
+  const u = n.toUpperCase();
+  return /\.ZT2$/.test(u) || /FLST_SEQ/.test(u) || /\.ZIR$/.test(u) || /\.ZIC$/.test(u) || /\.ZDL$/.test(u);
+}
 
 $('list').onclick = async ()=>{
   try{
     filelistEl.innerHTML=''; filelistEl.className='dim';
     const names = await listFiles();
     names.forEach(n=>{
-      const d=document.createElement('div'); d.textContent=n;
-      if(n==='XXTRVL.ZD2'){ d.className='hit'; d.textContent='★ '+n; }
+      const d=document.createElement('div');
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.className='delcb'; cb.value=n;
+      const prot = isProtected(n);
+      if(prot){ cb.disabled=true; cb.title='protected system file'; }
+      d.appendChild(cb);
+      const label=document.createElement('span'); label.style.marginLeft='8px';
+      label.textContent = (n==='XXTRVL.ZD2'?'★ ':'') + n + (prot?'  (protected)':'');
+      d.appendChild(label);
+      if(n==='XXTRVL.ZD2') d.className='hit';
       filelistEl.appendChild(d);
     });
     filelistEl.className='';
+    const delBtn=$('delselected'); delBtn.disabled = names.length===0;
     $('result').innerHTML = `<div class="big ${names.includes('XXTRVL.ZD2')?'ok':'err'}">${names.includes('XXTRVL.ZD2')?'✔ XXTRVL.ZD2 present':'✘ XXTRVL.ZD2 NOT found'}</div>`;
     log('listed '+names.length+' files');
   }catch(e){ log('list error: '+e.message); $('result').innerHTML=`<span class="err">error: ${e.message}</span>`; }
+};
+
+$('delselected').onclick = async ()=>{
+  const cbs=[...filelistEl.querySelectorAll('input.delcb:checked')];
+  if(!cbs.length){ $('result').innerHTML='<span class="err">check at least one file to delete</span>'; return; }
+  const names=cbs.map(c=>c.value);
+  const safe=$('delsafe').checked;
+  if(safe && names.some(isProtected)){ $('result').innerHTML='<span class="err">selection includes protected system files — untick "protect" only if you know what you are doing</span>'; return; }
+  if(!confirm('Delete these files from the pedal?\n\n'+names.join('\n')+'\n\nThis cannot be undone.')) return;
+  $('result').innerHTML='<div class="dim">deleting…</div>';
+  let ok=0, fail=0;
+  for(const n of names){
+    try{
+      const r = await deleteFile(n);
+      const good = r && r[0]===0x60 && r[4]===0x04;
+      if(good) ok++; else fail++;
+      log('delete '+n+' -> '+(good?'OK':'rejected '+Array.from(r||[]).map(b=>b.toString(16)).join(' ')));
+    }catch(e){ fail++; log('delete '+n+' error: '+e.message); }
+  }
+  // refresh the list
+  $('list').onclick();
+  $('result').innerHTML = `<div class="big ${fail===0?'ok':'err'}">Deleted ${ok} file(s)${fail?`, ${fail} failed`:''}</div><div class="dim" style="margin-top:6px">re-ran list — check Disk usage to confirm space freed</div>`;
 };
 
 $('download').onclick = async ()=>{
