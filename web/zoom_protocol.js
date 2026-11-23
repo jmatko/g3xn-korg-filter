@@ -283,12 +283,44 @@
     return lo + (b[4] * 0x100000000);
   }
 
+  // ---------------------------------------------------------------------------
+  // List/check reply filename decode.
+  // Reply body (after F0 52 00 6E):  60 04 25 00 00 <6 bytes size/flags> <name cstr>
+  //   body[0]=60  body[1]=04 ("entry follows")  body[2]=25 (echo of the request)
+  //   name field = body[11..23] (13 bytes).
+  // Verified against mungewell file_wild (reads msg.data[14..26]; mido data[0]=0x52,
+  // so data[14] == body[11]) and a real G3Xn reply: 60 04 25 00 00 17 00 00 00 00 00 46..
+  // (note body[1]==0x04 is the indicator, body[4] is just padding/echo).
+  // Returns null if this is not an "entry follows" reply.
+  // ---------------------------------------------------------------------------
+  function listName(body) {
+    if (!body || body[0] !== 0x60 || body[1] !== 0x04) return null;
+    // Primary: fixed 13-byte field at body[11].
+    let s = '';
+    for (let i = 11; i < 24 && i < body.length; i++) {
+      const c = body[i];
+      if (c === 0) break;
+      s += String.fromCharCode(c);
+    }
+    if (s) return s;
+    // Fallback: first printable ASCII run starting at body[11] (in case the field
+    // is longer than 13 on some firmware).
+    s = '';
+    for (let i = 11; i < body.length; i++) {
+      const c = body[i];
+      if (c === 0) break;
+      if (c < 0x20 || c > 0x7e) continue;
+      s += String.fromCharCode(c);
+    }
+    return s || null;
+  }
+
   return {
     crc32, checksum5,
     pack7, unpack7,
     SYSEX, buildSysEx, parseSysEx, isFileReply,
     parseZd2Header,
     ZT2_SIZE, parseZt2, rebuildZt2, zt2AddEffect, zt2RemoveEffect,
-    fromU35,
+    fromU35, listName,
   };
 });

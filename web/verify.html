@@ -104,22 +104,12 @@ function request(body, timeout=4000){
 }
 
 // ---- File READ protocol (G3Xn-verified) ----
-// Decode a filename from a list/check reply. Layout (from a real G3Xn reply):
-//   60 04 25 00 00 <6 bytes size/flags> <filename cstr...>
-//   body[0]=60  body[4]=04 (entry follows)  name starts at body[11].
-function listName(r){
-  if(!r || r[0]!==0x60 || r[4]!==0x04) return null;
-  const s = new TextDecoder().decode(r.slice(11, r.length));
-  const name = s.split('\x00')[0];
-  return name || null;
-}
-
 async function listFiles(){
   const names = [];
   let r = await request(new Uint8Array([0x60,0x25,0x00,0x00,0x2A,0x00]));
   let guard = 0;
-  while(r && r[4]===0x04 && guard++ < 400){
-    const name = listName(r);
+  while(r && r[0]===0x60 && r[1]===0x04 && guard++ < 400){
+    const name = P.listName(r);
     if(!name) break;
     names.push(name);
     r = await request(new Uint8Array([0x60,0x26,0x00,0x00,0x2A,0x00]));
@@ -233,7 +223,7 @@ $('delselected').onclick = async ()=>{
   for(const n of names){
     try{
       const r = await deleteFile(n);
-      const good = r && r[0]===0x60 && r[4]===0x04;
+      const good = r && r[0]===0x60 && r[1]===0x04;
       if(good) ok++; else fail++;
       log('delete '+n+' -> '+(good?'OK':'rejected '+Array.from(r||[]).map(b=>b.toString(16)).join(' ')));
     }catch(e){ fail++; log('delete '+n+' error: '+e.message); }

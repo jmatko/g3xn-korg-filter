@@ -54,6 +54,19 @@ t('buildSysEx/parseSysEx round-trip',
 // 6. checksum5 is 5 bytes
 t('checksum5 length 5', P.checksum5(new Uint8Array([1, 2, 3, 4, 5])).length === 5);
 
+// 6b. listName — decode a real G3Xn list reply (from the captured log):
+//     < f0 52 00 6e 60 04 25 00 00 17 00 00 00 00 00 46 ...
+//     body = 60 04 25 00 00 17 00 00 00 00 00 46 ...  -> name starts at body[11] = 'F'
+{
+  const body = new Uint8Array([0x60,0x04,0x25,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,
+    0x46,0x4c,0x53,0x54,0x5f,0x53,0x45,0x51,0x00,0x00,0x00]); // 'FLST_SEQ\0'
+  const n = P.listName(body);
+  t('listName real reply -> FLST_SEQ', n === 'FLST_SEQ');
+  // a non-entry reply (status 03) must return null
+  const noentry = new Uint8Array([0x60,0x03,0x00,0x00,0x00,0x00,0x00]);
+  t('listName non-entry -> null', P.listName(noentry) === null);
+}
+
 // 7. pack7 matches mungewell reference on random data (inline reference)
 function mwPack(data) {
   // Faithful port of mungewell/zoom-zt2 pack(): encode is a 1-indexed buffer,
