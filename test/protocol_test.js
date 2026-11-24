@@ -67,6 +67,34 @@ t('checksum5 length 5', P.checksum5(new Uint8Array([1, 2, 3, 4, 5])).length === 
   t('listName non-entry -> null', P.listName(noentry) === null);
 }
 
+// 6c. ZT2 (FLST_SEQ) round-trip against the real mungewell EMPTY.ZT2 sample.
+//     This is the safety check for the uninstall flow: if parse->rebuild is not
+//     byte-for-byte identical, we would corrupt the pedal's effect sequence.
+{
+  const fs = require('fs');
+  const path = require('path');
+  const raw = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', 'EMPTY.ZT2')));
+  const z = P.parseZt2(raw);
+  t('ZT2 header filename = BYPASS.ZD2', z.header.filename === 'BYPASS.ZD2');
+  t('ZT2 has >0 groups', z.groups.length >= 10);
+  t('ZT2 EMPTY sample has 0 effects', z.groups.reduce((a, g) => a + g.entries.length, 0) === 0);
+  const rebuilt = P.rebuildZt2(z);
+  let diff = 0;
+  for (let i = 0; i < raw.length; i++) if (raw[i] !== rebuilt[i]) diff++;
+  t('ZT2 parse->rebuild is byte-for-byte identical', diff === 0);
+  // add an effect, rebuild, confirm it appears and size stays 8502
+  const z2 = P.zt2AddEffect(z, { filename: 'XXTRVL.ZD2', version: '1.00', id: 0x02001010 });
+  const r2 = P.rebuildZt2(z2);
+  t('ZT2 add-effect keeps size 8502', r2.length === 8502);
+  t('ZT2 added effect present', z2.groups.some(g => g.entries.some(e => e.filename === 'XXTRVL.ZD2')));
+  // remove it again -> back to original
+  const z3 = P.zt2RemoveEffect(z2, 'XXTRVL.ZD2');
+  const r3 = P.rebuildZt2(z3);
+  let diff3 = 0;
+  for (let i = 0; i < raw.length; i++) if (raw[i] !== r3[i]) diff3++;
+  t('ZT2 add->remove restores original bytes', diff3 === 0);
+}
+
 // 7. pack7 matches mungewell reference on random data (inline reference)
 function mwPack(data) {
   // Faithful port of mungewell/zoom-zt2 pack(): encode is a 1-indexed buffer,

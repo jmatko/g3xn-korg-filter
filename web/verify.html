@@ -60,6 +60,22 @@
 
   <div class="card">
     <div class="row">
+      <button id="seqload" disabled>4 · Manage effects (free space)</button>
+      <span class="dim" style="font-size:12.5px">Uninstall effects from FLST_SEQ to free disk space, then delete their files.</span>
+    </div>
+    <div id="seqpanel" style="margin-top:12px; display:none">
+      <div id="seqinfo" class="dim" style="margin-bottom:8px"></div>
+      <div id="seqlist" style="max-height:260px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; background:#0b0e13; border-radius:8px; padding:10px"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="seqapply" class="danger" disabled>Apply: uninstall + delete selected</button>
+        <label class="dim" style="font-size:12.5px"><input type="checkbox" id="seqsafe" checked> only allow uninstalling (won't touch stock effects)</label>
+      </div>
+      <div id="seqresult" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
       <span class="dim">SysEx log</span>
       <button id="copylog" class="ghost" style="margin-left:auto">Copy log</button>
       <button id="clearlog" class="ghost">Clear</button>
@@ -160,6 +176,60 @@ async function downloadFile(name){
   return out;
 }
 
+// ---- File WRITE protocol (mungewell file_upload, verified byte layout) ----
+//   60 24 <name cstr>            create
+//   60 20 01 00×8 <name cstr>    open for write
+//   60 05 00                     ack
+//   per 512-byte block:
+//     60 23 40 00 00 00 00 <len u14> 00 00 00 <pack7> <crc5>
+//     60 05 00                 ack
+//   60 09                       terminate
+async function uploadFile(name, data){
+  const c = new TextEncoder().encode(name + '\x00');
+  await request(new Uint8Array([0x60,0x24, ...c]));                    // create
+  await request(new Uint8Array([0x60,0x20,0x01,0,0,0,0,0,0,0,0,0, ...c])); // open write
+  await request(new Uint8Array([0x60,0x05,0x00]));                     // ack
+  let off = 0;
+  while(off < data.length){
+    const len = Math.min(512, data.length - off);
+    const block = data.subarray(off, off + len);
+    const packed = P.pack7(block);
+    const crc = P.checksum5(block);   // 5 bytes, 7-bit, low-first
+    const pkt = new Uint8Array([0x60,0x23,0x40,0x00,0x00,0x00,0x00,
+      len & 0x7F, (len >> 7) & 0x7F, 0x00, 0x00, 0x00]);
+    const out = new Uint8Array(pkt.length + packed.length + crc.length);
+    out.set(pkt, 0); out.set(packed, pkt.length); out.set(crc, pkt.length + packed.length);
+    await request(out);
+    await request(new Uint8Array([0x60,0x05,0x00]));                  // ack
+    off += len;
+  }
+  await request(new Uint8Array([0x60,0x09]));                        // terminate
+  return true;
+}
+
+// Effect group id -> human name (mungewell ZT2 Group enum).
+const GROUP_NAMES = {1:'DYNAMICS',2:'FILTER',3:'DRIVE',4:'AMP',5:'CABINET',6:'MODULATION',7:'SFX',8:'DELAY',9:'REVERB',11:'PEDAL',20:'AG_MODEL',29:'ACOUSTIC',30:'RHYTHM',31:'LOOPER'};
+function groupLabel(g){ return GROUP_NAMES[g] || ('0x'+g.toString(16)); }
+
+// Download FLST_SEQ.ZT2 and parse it. Returns the parsed ZT2 object.
+async function loadSequence(){
+  log('downloading FLST_SEQ.ZT2 …');
+  const data = await downloadFile('FLST_SEQ.ZT2');
+  if(data.length < 8502) throw new Error('FLST_SEQ too small ('+data.length+' B)');
+  const z = P.parseZt2(data);
+  window._seq = z; window._seqRaw = data;
+  log('FLST_SEQ parsed: '+z.groups.length+' groups, '+z.groups.reduce((a,g)=>a+g.entries.length,0)+' effects');
+  return z;
+}
+
+// Re-upload a parsed ZT2 (after edits) back to FLST_SEQ.ZT2.
+async function saveSequence(z){
+  const buf = P.rebuildZt2(z);
+  log('uploading FLST_SEQ.ZT2 ('+buf.length+' B) …');
+  await uploadFile('FLST_SEQ.ZT2', buf);
+  log('FLST_SEQ upload complete');
+}
+
 // ---- UI wiring ----
 $('connect').onclick = async ()=>{
   try{
@@ -177,7 +247,7 @@ $('connect').onclick = async ()=>{
     // also listen on output in case replies come back on the same port
     out.onmidimessage = onMidi;
     setConn('connected: '+out.name, 'ok');
-    ['list','download','verify','disk','delselected'].forEach(id=>$(id).disabled=false);
+    ['list','download','verify','disk','delselected','seqload'].forEach(id=>$(id).disabled=false);
     log('connected to ' + out.name);
   }catch(e){ setConn('error: '+e.message, 'err'); log('connect error: '+e.message); }
 };
@@ -287,6 +357,71 @@ $('disk').onclick = async ()=>{
               : `<div class="dim" style="margin-top:8px">plenty of free space for an upload</div>`);
     window._avail = avail;
   }catch(e){ log('disk error: '+e.message); }
+};
+
+// ---- Manage effects (uninstall from FLST_SEQ, then delete) ----
+function renderSeq(z){
+  const seqlist = $('seqlist'); seqlist.innerHTML='';
+  let total=0;
+  for(const g of z.groups){
+    if(g.entries.length===0) continue;
+    const gh=document.createElement('div');
+    gh.style.cssText='font-weight:700; color:var(--dim); margin-top:6px';
+    gh.textContent = groupLabel(g.group)+'  (group '+g.group+')';
+    seqlist.appendChild(gh);
+    for(const e of g.entries){
+      total++;
+      const row=document.createElement('div');
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.className='seqcb'; cb.value=e.filename;
+      cb.style.marginRight='8px';
+      row.appendChild(cb);
+      const label=document.createElement('span');
+      label.textContent = e.filename+'  ['+(e.installed?'installed':'uninstalled')+']  v'+e.version;
+      row.appendChild(label);
+      seqlist.appendChild(row);
+    }
+  }
+  if(total===0){ seqlist.innerHTML='<span class="dim">no effects installed in FLST_SEQ</span>'; }
+  $('seqinfo').textContent = z.groups.length+' groups, '+total+' effect(s) installed. Check the effects to uninstall, then Apply.';
+  $('seqapply').disabled = total===0;
+}
+
+$('seqload').onclick = async ()=>{
+  try{
+    $('seqpanel').style.display='block';
+    $('seqresult').innerHTML='';
+    $('seqinfo').textContent='loading…';
+    const z = await loadSequence();
+    renderSeq(z);
+  }catch(e){ log('manage effects error: '+e.message); $('seqinfo').textContent='error: '+e.message; }
+};
+
+$('seqapply').onclick = async ()=>{
+  const cbs=[...$('seqlist').querySelectorAll('input.seqcb:checked')];
+  if(!cbs.length){ $('seqresult').innerHTML='<span class="err">check at least one effect to uninstall</span>'; return; }
+  const names=cbs.map(c=>c.value);
+  const safe=$('seqsafe').checked;
+  if(safe && names.some(isProtected)){ $('seqresult').innerHTML='<span class="err">selection includes protected system files</span>'; return; }
+  if(!confirm('Uninstall these effects from FLST_SEQ and delete their files?\n\n'+names.join('\n')+'\n\nThis removes them from the pedal. Cannot be undone without re-uploading.')) return;
+  try{
+    let z = window._seq;
+    if(!z) z = await loadSequence();
+    for(const n of names){ z = P.zt2RemoveEffect(z, n); }
+    $('seqresult').innerHTML='<div class="dim">rewriting FLST_SEQ…</div>';
+    await saveSequence(z);
+    window._seq = z;
+    let ok=0, fail=0;
+    for(const n of names){
+      try{
+        const r = await deleteFile(n);
+        const good = r && r[0]===0x60 && r[1]===0x04;
+        if(good) ok++; else fail++;
+        log('delete '+n+' -> '+(good?'OK':'rejected '+Array.from(r||[]).map(b=>b.toString(16)).join(' ')));
+      }catch(e){ fail++; log('delete '+n+' error: '+e.message); }
+    }
+    renderSeq(z);
+    $('seqresult').innerHTML = `<div class="big ${fail===0?'ok':'err'}">Uninstalled + deleted ${ok} effect(s)${fail?`, ${fail} failed`:''}</div><div class="dim" style="margin-top:6px">re-run Disk usage to confirm freed space, then upload Traveler</div>`;
+  }catch(e){ log('apply error: '+e.message); $('seqresult').innerHTML='<span class="err">'+e.message+'</span>'; }
 };
 
 $('copylog').onclick = ()=>{ navigator.clipboard.writeText(logEl.textContent); };

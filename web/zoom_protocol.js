@@ -171,6 +171,12 @@
   const ZT2_HEADER = 78;
   const ZT2_GROUP_HDR = 26;
   const ZT2_ENTRY = 26;
+  // Header field offsets (verified against mungewell EMPTY.ZT2, 8502 bytes):
+  //   0x00 '>>>\0'  0x04 pad22  0x1A filename(12, left-padded)  0x26 pad6
+  //   0x2C 0x01     0x2D pad7   0x34 '<<<\0'  0x38 pad22  -> 0x4E (78)
+  const ZT2_HDR_NAME = 0x1A;
+  const ZT2_HDR_FLAG = 0x2C;
+  const ZT2_HDR_FOOT = 0x34;
 
   function zt2ReadName(d, off, n) {
     let s = '';
@@ -183,7 +189,7 @@
     const d = data;
     const header = {
       magic: zt2ReadName(d, 0, 3),
-      filename: zt2ReadName(d, 0x18, 12),
+      filename: zt2ReadName(d, ZT2_HDR_NAME, 12),
     };
     const groups = [];
     let off = ZT2_HEADER;
@@ -192,16 +198,21 @@
       const group = d[off + 4];
       off += ZT2_GROUP_HDR;
       const entries = [];
+      // Effect entries are 26-byte records with a 12-byte filename. A group with
+      // zero effects goes straight from its '>>>' header to the '<<<' footer
+      // (the common case: EMPTY.ZT2 is 19 empty groups, one per effect type).
+      // Stop as soon as we hit the footer (filename bytes are '<<<') or an empty
+      // filename — never treat the footer as an effect.
       while (off + ZT2_ENTRY <= ZT2_SIZE) {
         const fname = zt2ReadName(d, off, 12);
-        if (fname === '') break; // empty entry = end of group
+        if (fname === '' || fname.startsWith('<<<') || fname.startsWith('>>>')) break;
         const version = zt2ReadName(d, off + 13, 4);
         const installed = d[off + 18];
         const id = (d[off + 19] | (d[off + 20] << 8) | (d[off + 21] << 16) | (d[off + 22] << 24)) >>> 0;
         entries.push({ filename: fname, version, installed, id });
         off += ZT2_ENTRY;
       }
-      // group footer
+      // group footer '<<<' + group + pad21 (26 bytes)
       if (off + ZT2_GROUP_HDR <= ZT2_SIZE && zt2ReadName(d, off, 3) === '<<<') off += ZT2_GROUP_HDR;
       groups.push({ group, entries });
     }
@@ -214,11 +225,11 @@
 
   function rebuildZt2(z) {
     const buf = new Uint8Array(ZT2_SIZE); // zero-padded
-    // header
+    // header (offsets verified against mungewell EMPTY.ZT2)
     zt2WriteName(buf, 0, '>>>', 3); buf[3] = 0;
-    zt2WriteName(buf, 0x18, z.header.filename, 12);
-    buf[0x2A] = 1;
-    zt2WriteName(buf, 0x32, '<<<', 3); buf[0x35] = 0;
+    zt2WriteName(buf, ZT2_HDR_NAME, z.header.filename, 12);
+    buf[ZT2_HDR_FLAG] = 1;
+    zt2WriteName(buf, ZT2_HDR_FOOT, '<<<', 3); buf[ZT2_HDR_FOOT + 3] = 0;
     // groups
     let off = ZT2_HEADER;
     for (const g of z.groups) {
