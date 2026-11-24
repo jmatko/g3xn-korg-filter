@@ -76,6 +76,20 @@
 
   <div class="card">
     <div class="row">
+      <button id="upload" disabled>5 · Upload effect (.ZD2)</button>
+      <input type="file" id="uploadfile" accept=".zd2,.ZD2" style="display:none">
+      <span id="uploadname" class="dim" style="font-size:12.5px">no file chosen</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="dim" style="font-size:12.5px">on-pedal name</label>
+      <input type="text" id="uploaddest" value="XXTRVL.ZD2" maxlength="12" style="background:#0f1319;color:var(--fg);border:1px solid #2a3140;border-radius:8px;padding:8px;width:140px;font-family:ui-monospace,monospace">
+      <label class="dim" style="font-size:12.5px"><input type="checkbox" id="uploadverify" checked> read back + byte-verify after upload</label>
+    </div>
+    <div id="uploadresult" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
       <span class="dim">SysEx log</span>
       <button id="copylog" class="ghost" style="margin-left:auto">Copy log</button>
       <button id="clearlog" class="ghost">Clear</button>
@@ -247,7 +261,7 @@ $('connect').onclick = async ()=>{
     // also listen on output in case replies come back on the same port
     out.onmidimessage = onMidi;
     setConn('connected: '+out.name, 'ok');
-    ['list','download','verify','disk','delselected','seqload'].forEach(id=>$(id).disabled=false);
+    ['list','download','verify','disk','delselected','seqload','upload'].forEach(id=>$(id).disabled=false);
     log('connected to ' + out.name);
   }catch(e){ setConn('error: '+e.message, 'err'); log('connect error: '+e.message); }
 };
@@ -422,6 +436,50 @@ $('seqapply').onclick = async ()=>{
     renderSeq(z);
     $('seqresult').innerHTML = `<div class="big ${fail===0?'ok':'err'}">Uninstalled + deleted ${ok} effect(s)${fail?`, ${fail} failed`:''}</div><div class="dim" style="margin-top:6px">re-run Disk usage to confirm freed space, then upload Traveler</div>`;
   }catch(e){ log('apply error: '+e.message); $('seqresult').innerHTML='<span class="err">'+e.message+'</span>'; }
+};
+
+// ---- Upload (.ZD2) ----
+$('uploadfile').onchange = async ()=>{
+  const f = $('uploadfile').files[0];
+  if(!f) return;
+  $('uploadname').textContent = f.name + ' (' + f.size + ' B)';
+  if(/\.ZD2$/i.test(f.name) && f.name.length<=12){ $('uploaddest').value = f.name.toUpperCase(); }
+  const buf = new Uint8Array(await f.arrayBuffer());
+  window._uploadSrc = buf;
+  const h = P.parseZd2Header(buf);
+  $('uploadresult').innerHTML = h
+    ? `<div class="dim">loaded ${f.name} — ${h.name}, group 0x${h.group.toString(16)} (${h.groupname}), id 0x${h.id.toString(16).padStart(8,'0')}, ${buf.length} B. Click Upload to write to the pedal.</div>`
+    : `<div class="err">loaded ${f.name} (${buf.length} B) but it is not a valid ZD2 (magic mismatch) — upload will likely be rejected.</div>`;
+  log('loaded ' + f.name + ' (' + buf.length + ' B)');
+};
+
+$('upload').onclick = async ()=>{
+  const src = window._uploadSrc;
+  const dest = $('uploaddest').value.trim();
+  if(!src){ $('uploadresult').innerHTML='<span class="err">choose a .ZD2 file first</span>'; return; }
+  if(!dest || dest.length>12){ $('uploadresult').innerHTML='<span class="err">on-pedal name must be 1-12 chars</span>'; return; }
+  if(!confirm('Upload '+src.length+' B to the pedal as '+dest+'?\n\nThis overwrites any existing file with that name.')) return;
+  const up = $('upload'); up.disabled = true;
+  $('uploadresult').innerHTML='<div class="dim">uploading…</div>';
+  try{
+    log('=== upload '+dest+' ('+src.length+' B) ===');
+    await uploadFile(dest, src);
+    log('upload sequence complete');
+    if($('uploadverify').checked){
+      $('uploadresult').innerHTML='<div class="dim">reading back to verify…</div>';
+      const back = await downloadFile(dest);
+      let ok = back.length===src.length, firstDiff=-1;
+      if(ok){ for(let i=0;i<back.length;i++){ if(back[i]!==src[i]){ firstDiff=i; ok=false; break; } } }
+      window._downloaded = back; window._expected = src;
+      $('uploadresult').innerHTML = `<div class="big ${ok?'ok':'err'}">${ok?'✔ UPLOAD VERIFIED — '+dest+' matches byte-for-byte ('+back.length+' B)':'✘ VERIFY FAILED — '+dest+' differs at byte '+(firstDiff<0?'size':' '+firstDiff)}</div><div class="dim" style="margin-top:6px">${ok?'run Disk usage / List to confirm on the pedal.':'the file was written but does not match the source — check the SysEx log for a rejected block.'}</div>`;
+      log('verify: '+(ok?'PASS':'FAIL'));
+    } else {
+      $('uploadresult').innerHTML='<div class="big ok">✔ upload sequence sent</div><div class="dim" style="margin-top:6px">verification skipped — run List / Download to confirm.</div>';
+    }
+  }catch(e){
+    log('upload error: '+e.message);
+    $('uploadresult').innerHTML='<span class="err">upload error: '+e.message+'</span>';
+  }finally{ up.disabled = false; }
 };
 
 $('copylog').onclick = ()=>{ navigator.clipboard.writeText(logEl.textContent); };
