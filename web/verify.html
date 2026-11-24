@@ -61,7 +61,8 @@
   <div class="card">
     <div class="row">
       <button id="seqload" disabled>4 · Manage effects (free space)</button>
-      <span class="dim" style="font-size:12.5px">Uninstall effects from FLST_SEQ to free disk space, then delete their files.</span>
+      <button id="seqbackup" class="ghost" disabled>Backup FLST_SEQ</button>
+      <span class="dim" style="font-size:12.5px">Uninstall effects from FLST_SEQ to free disk space, then delete their files. Back up the sequence first.</span>
     </div>
     <div id="seqpanel" style="margin-top:12px; display:none">
       <div id="seqinfo" class="dim" style="margin-bottom:8px"></div>
@@ -261,7 +262,7 @@ $('connect').onclick = async ()=>{
     // also listen on output in case replies come back on the same port
     out.onmidimessage = onMidi;
     setConn('connected: '+out.name, 'ok');
-    ['list','download','verify','disk','delselected','seqload','upload'].forEach(id=>$(id).disabled=false);
+    ['list','download','verify','disk','delselected','seqload','seqbackup','upload'].forEach(id=>$(id).disabled=false);
     log('connected to ' + out.name);
   }catch(e){ setConn('error: '+e.message, 'err'); log('connect error: '+e.message); }
 };
@@ -480,6 +481,60 @@ $('upload').onclick = async ()=>{
     log('upload error: '+e.message);
     $('uploadresult').innerHTML='<span class="err">upload error: '+e.message+'</span>';
   }finally{ up.disabled = false; }
+};
+
+// ---- Backup FLST_SEQ (READ-ONLY: download + sanity-check + save to disk) ----
+// Only calls downloadFile() (open-for-read 60 20 02). It NEVER sends
+// create / open-write / write-block, so it cannot alter or corrupt the pedal.
+function stampName(prefix){
+  const d = new Date();
+  const p = n => String(n).padStart(2,'0');
+  return prefix + '_' + d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate())
+         + '_' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds()) + '.ZT2';
+}
+function saveBlob(bytes, filename){
+  const blob = new Blob([bytes], {type:'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+}
+
+$('seqbackup').onclick = async ()=>{
+  const btn = $('seqbackup'); btn.disabled = true;
+  try{
+    // Fresh read so the backup reflects the pedal's current sequence.
+    const data = await downloadFile('FLST_SEQ.ZT2');
+    // Sanity 1: minimum size (a truncated read must not be saved).
+    if(data.length < P.ZT2_SIZE){
+      throw new Error('read-back too small (' + data.length + ' B < ' + P.ZT2_SIZE + ' B); refusing to save a truncated backup');
+    }
+    // Sanity 2: parse + verify structure.
+    let z;
+    try{ z = P.parseZt2(data); }
+    catch(e){ throw new Error('downloaded bytes are not a parseable ZT2: ' + e.message); }
+    if(z.header.magic !== '>>>'){
+      throw new Error('bad ZT2 magic (got ' + JSON.stringify(z.header.magic) + ', expected ">>>")');
+    }
+    if(!z.groups.length){
+      throw new Error('no groups parsed - sequence appears empty/corrupt');
+    }
+    const nfx = z.groups.reduce((a,g)=>a+g.entries.length, 0);
+    const ninst = z.groups.reduce((a,g)=>a+g.entries.filter(e=>e.installed).length, 0);
+    const fname = stampName('FLST_SEQ');
+    saveBlob(data, fname);
+    window._seq = z; window._seqRaw = data;
+    log('backup: saved ' + fname + ' (' + data.length + ' B, ' + z.groups.length + ' groups, ' + nfx + ' effects, ' + ninst + ' installed)');
+    $('seqresult').innerHTML =
+      '<div class="big ok">&#10003; BACKUP SAVED &mdash; ' + fname + '</div>' +
+      '<div class="dim" style="margin-top:6px">' + data.length + ' B, ' + z.groups.length + ' groups, ' + nfx + ' effect(s) (' + ninst + ' installed). ' +
+      'Saved to your computer &mdash; safe to uninstall effects now. Keep this file to restore the sequence.</div>';
+  }catch(e){
+    log('backup error: ' + e.message);
+    $('seqresult').innerHTML = '<span class="err">backup failed: ' + e.message + '</span>';
+  }finally{ btn.disabled = false; }
 };
 
 $('copylog').onclick = ()=>{ navigator.clipboard.writeText(logEl.textContent); };
