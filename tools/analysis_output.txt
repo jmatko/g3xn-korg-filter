@@ -1,0 +1,187 @@
+======================================================================
+Guitar Lab.exe Binary Protocol Analysis
+======================================================================
+
+File size: 7,437,000 bytes (7.1 MB)
+
+----------------------------------------------------------------------
+1. PE HEADER
+----------------------------------------------------------------------
+  PE header at: 0x000108
+  Signature: b'PE\x00\x00'
+  Machine: 0x014c (0x014c = i386)
+  Sections: 6
+  Timestamp: 1649814587
+
+----------------------------------------------------------------------
+2. SYSEX PROTOCOL PATTERNS
+----------------------------------------------------------------------
+  Full SysEx header F0 52 00 6E: 324 occ [0x000f69, 0x0014c9, 0x001cb9, 0x002079, 0x0027e9 (+319 more)]
+  CMD 60 25 (file status/list): 38 occ [0x02b053, 0x05dc50, 0x3883f0, 0x38a0e8, 0x3bc1cf (+33 more)]
+  CMD 60 26 (list next): 31 occ [0x02b3e5, 0x05dfe3, 0x31fac2, 0x339c60, 0x339d58 (+26 more)]
+  CMD 60 27 (list end): 45 occ [0x00c7eb, 0x02b793, 0x040f0b, 0x190543, 0x33a1b1 (+40 more)]
+  CMD 60 20 (open file): 46 occ [0x029f23, 0x05caf3, 0x12dc1b, 0x1484ae, 0x15bab0 (+41 more)]
+  CMD 60 21 (close file): 50 occ [0x02a2a3, 0x05ce35, 0x1fa0a7, 0x1fa150, 0x2dff7c (+45 more)]
+  CMD 60 23 (write block): 51 occ [0x02a960, 0x05d545, 0x1f9bd8, 0x1fedbc, 0x210d6c (+46 more)]
+  CMD 60 24 (create file): 33 occ [0x02acf3, 0x05d8b3, 0x12de5d, 0x1b6a0c, 0x22b22c (+28 more)]
+  CMD 60 05 (ACK/read next): 147 occ [0x01590c, 0x015985, 0x023f2b, 0x04a1ec, 0x102db2 (+142 more)]
+  CMD 60 09 (terminate): 41 occ [0x024d60, 0x30f806, 0x388c70, 0x3895dc, 0x3a47aa (+36 more)]
+  CMD 60 04 (data reply): 281 occ [0x023b75, 0x0258d2, 0x02594c, 0x0259c5, 0x06f683 (+276 more)]
+  CMD 60 22 (read data): 34 occ [0x02a605, 0x05d1b3, 0x13e17c, 0x1f3a5a, 0x29e32c (+29 more)]
+  CMD 60 29 (disk info): 33 occ [0x33a58e, 0x388d90, 0x38a10c, 0x3a7efe, 0x3b02a7 (+28 more)]
+  CMD 60 03 (error/nack): 220 occ [0x023845, 0x0358f7, 0x035967, 0x07bba5, 0x0b2357 (+215 more)]
+  CMD 60 01 (ack): 217 occ [0x0558f5, 0x06fc32, 0x079258, 0x07aee1, 0x09330e (+212 more)]
+  CMD 60 02 (nack): 230 occ [0x02342d, 0x0458f7, 0x045957, 0x0459c5, 0x0833fc (+225 more)]
+  CMD 60 06 (unknown): 59 occ [0x00592c, 0x0059b2, 0x024323, 0x132b8c, 0x142b2e (+54 more)]
+  CMD 60 07 (unknown): 55 occ [0x0246a3, 0x0ca2e4, 0x0ca328, 0x0cc11c, 0x2a360e (+50 more)]
+  CMD 60 08 (unknown): 66 occ [0x024a05, 0x04187c, 0x098f6e, 0x0bbce3, 0x0bc060 (+61 more)]
+  CMD 60 28 (unknown): 48 occ [0x02bb13, 0x05e370, 0x07b0d3, 0x07b0f3, 0x07b193 (+43 more)]
+  CMD 60 2A (unknown): 44 occ [0x00ea29, 0x02bc80, 0x05e71d, 0x1370dc, 0x1948be (+39 more)]
+  CMD 60 2B (unknown): 52 occ [0x05eb35, 0x0b241e, 0x0b8226, 0x18d8a1, 0x21e340 (+47 more)]
+  CMD 60 2C (unknown): 43 occ [0x02c305, 0x05ee65, 0x147fa8, 0x17fc16, 0x2705c8 (+38 more)]
+  CMD 60 2D (unknown): 52 occ [0x02c625, 0x05f21b, 0x33bbf0, 0x33eff9, 0x379d91 (+47 more)]
+  CMD 60 2E (unknown): 43 occ [0x000227, 0x02c9b3, 0x05f613, 0x1cbdcb, 0x34fa89 (+38 more)]
+  CMD 60 2F (unknown): 49 occ [0x02cda3, 0x05f993, 0x19e11f, 0x2febec, 0x3689f1 (+44 more)]
+  CMD 60 30 (unknown): 102 occ [0x02d143, 0x05fcf5, 0x07afb3, 0x07afd3, 0x07aff3 (+97 more)]
+
+----------------------------------------------------------------------
+3. SYSEX HEADER CONTEXT (first 10 occurrences)
+----------------------------------------------------------------------
+
+  Occurrence 1 at 0x000f69:
+
+  Occurrence 2 at 0x0014c9:
+
+  Occurrence 3 at 0x001cb9:
+
+  Occurrence 4 at 0x002079:
+
+  Occurrence 5 at 0x0027e9:
+
+  Occurrence 6 at 0x0029b9:
+
+  Occurrence 7 at 0x002b79:
+
+  Occurrence 8 at 0x002bf9:
+
+  Occurrence 9 at 0x002c79:
+
+  Occurrence 10 at 0x003cf9:
+
+----------------------------------------------------------------------
+4. KEY CLASS NAMES
+----------------------------------------------------------------------
+  AVSysExMessage: 1 occ [0x66d87e]
+  AVMidiManager: 1 occ [0x66dc56]
+  AVZoomDevice: 1 occ [0x66dd6e]
+  AVGuitarLabDeviceDelegate: 50 occ [0x66d69e, 0x66e05a, 0x66e0d2 (+47 more)]
+  AVMidiInputCallback: 4 occ [0x66da26, 0x66dc2a, 0x66dc8d (+1 more)]
+  AVMidiOutput: 1 occ [0x6733c6]
+  AVMidiMessageCollector: 1 occ [0x672ce6]
+  Win32MidiService: 9 occ [0x672db6, 0x672dce, 0x672e58 (+6 more)]
+  Win32MidiDeviceQuery: 2 occ [0x672d8e, 0x673276]
+  AUMidiService: 2 occ [0x67321a, 0x673bfe]
+  AUMidiInCollector: 1 occ [0x672e46]
+  AUMidiOutHandle: 1 occ [0x673b46]
+  AUMidiServiceType: 1 occ [0x673bfe]
+  AVMidiManager: 1 occ [0x66dc56]
+  CommandManager: 5 occ [0x66d985, 0x66d9e3, 0x66da68 (+2 more)]
+  CommandManagerImpl: NOT FOUND
+
+----------------------------------------------------------------------
+5. WIN32 MIDI API FUNCTIONS
+----------------------------------------------------------------------
+  midiInOpen: 1 occ [0x669606]
+  midiInClose: 1 occ [0x6696b0]
+  midiInStart: 1 occ [0x6696a2]
+  midiInStop: 1 occ [0x66973e]
+  midiInMessage: 1 occ [0x6695de]
+  midiInAddBuffer: 1 occ [0x6696be]
+  midiInPrepareHeader: 1 occ [0x66965e]
+  midiInUnprepareHeader: 1 occ [0x6695ee]
+  midiInGetNumDevs: 1 occ [0x6696e2]
+  midiInGetDevCapsW: 1 occ [0x66968e]
+  midiOutOpen: 1 occ [0x669642]
+  midiOutClose: 1 occ [0x66972e]
+  midiOutShortMsg: 1 occ [0x6696f6]
+  midiOutLongMsg: 1 occ [0x66971c]
+  midiOutPrepareHeader: 1 occ [0x66962a]
+  midiOutUnprepareHeader: 1 occ [0x669674]
+  midiOutGetNumDevs: 1 occ [0x669708]
+  midiOutGetDevCapsW: 1 occ [0x669614]
+  midiOutReset: NOT FOUND
+
+----------------------------------------------------------------------
+6. FILE-RELATED STRINGS
+----------------------------------------------------------------------
+  '.ZD2': 2 occ [0x39d5e4, 0x60ec50]
+  '.ZT2': 1 occ [0x39c750]
+  '.zd2': 1 occ [0x605124]
+  'ZD2': 2 occ [0x39d5e5, 0x60ec51]
+  'ZT2': 1 occ [0x39c751]
+  'FLST_SEQ': 1 occ [0x39c748]
+  'USER': 3 occ [0x39ed34, 0x5f8e7d, 0x669044]
+  'FACTORY': 2 occ [0x39ed2c, 0x6049fd]
+
+----------------------------------------------------------------------
+7. CRC / CHECKSUM STRINGS
+----------------------------------------------------------------------
+  'crc': 2 occ [0x5f8a0b, 0x6c671c]
+  'CRC': 5 occ [0x39d7e3, 0x39d9f3, 0x572570 (+2 more)]
+  'checksum': 1 occ [0x5fce82]
+  'xor': 2 occ [0x61d288, 0x61d3b4]
+  'check': 5 occ [0x39ead2, 0x5f8b31, 0x5f8c8b (+2 more)]
+
+----------------------------------------------------------------------
+8. TIMING CONSTANTS (potential delays/timeouts)
+----------------------------------------------------------------------
+  250 ms (0x000000fa): 45 occ [0x074b05, 0x0b9c86, 0x0d286d]
+  1000 ms (0x000003e8): 72 occ [0x09a973, 0x09a995, 0x09c501]
+  2000 ms (0x000007d0): 35 occ [0x0778a0, 0x077946, 0x082d6f]
+  5000 ms (0x00001388): 15 occ [0x06a644, 0x0734a4, 0x076e49]
+
+----------------------------------------------------------------------
+9. BLOCK SIZE CONSTANTS
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+10. LIST REQUEST PATTERN (F0 52 00 6E 60 25 00 00 2A 00 F7)
+----------------------------------------------------------------------
+  Exact list request pattern NOT FOUND in binary
+  (likely constructed at runtime from individual bytes)
+
+----------------------------------------------------------------------
+11. BYTE 0x2A (42) IN CONTEXT
+----------------------------------------------------------------------
+  0x43e233:   0x43e22f: 7f ea e0 73 60 25 4f 2a ff d0 41 af              |...s`%O*..A.|
+
+======================================================================
+SUMMARY
+======================================================================
+
+Protocol: Zoom SysEx (Manufacturer ID 0x006E)
+Header:   F0 52 00 6E ... F7
+API:      Win32 MIDI (midiIn*/midiOut*)
+Classes:  AVSysExMessage, AVMidiManager, AVZoomDevice,
+          AVGuitarLabDeviceDelegate, Win32MidiService
+
+Command codes confirmed in binary:
+  60 04 - Data reply
+  60 05 - ACK / Read next
+  60 09 - Terminate
+  60 20 - Open file
+  60 21 - Close file
+  60 22 - Read data
+  60 23 - Write block
+  60 24 - Create file
+  60 25 - File status / List
+  60 26 - List next
+  60 27 - List end
+  60 29 - Disk info
+
+File formats: .ZD2 (effects), .ZT2 (sequences)
+Config key: GuitarLabMIDIPortName7
+
+The protocol command codes match g3xn_raw.py exactly.
+The issue is likely in timing, framing, or flow control.
+
