@@ -152,35 +152,77 @@ def _parse_list(r):
     return out
 
 
-def download(g, name, outp):
+def download(g, name, outp, verbose=False):
+    """Download a file from the G3Xn.
+
+    CRITICAL: the G3Xn sends file data as RAW 8-bit bytes in the read reply,
+    NOT 7-bit packed (unlike the MS Plus). The read reply format is:
+      60 04 22 01 00 00 04 00 <raw data ...>
+    (8-byte header, then raw data). Data detection: r[3] == 0x01.
+    """
     nb = name.encode() + b"\x00"
-    # status (informational; G3Xn returns a size reply like 60 03 <size>, not 60 05 00,
-    # so we do NOT gate on it — the open-for-read reply is the real existence check)
-    g.send(bytes([0x60, 0x25, 0x00, 0x00]) + nb)
-    g.read_reply(2.0)
-    g.send(bytes([0x60, 0x05, 0x00]))
-    g.read_reply(2.0)
-    # open for read (mode 0x02)
-    g.send(bytes([0x60, 0x20, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) + nb)
-    open_r = g.read_reply(2.0)
-    # open-for-read ack: 60 04 20 ... ; if we get 60 03 .. the file likely doesn't exist
+    # status → file size at reply[26:30] (u32le)
+    st = g.request(bytes([0x60, 0x25, 0x00, 0x00]) + nb, 2.0)
+    fsize = None
+    if st and len(st) >= 30:
+        fsize = int.from_bytes(st[26:30], "little")
+    if verbose:
+        print(f"  file size: {fsize}", file=sys.stderr)
+
+    # Open for read (mode 0x02). Retry if the pedal is in an error state
+    # (returns 60 03 7f 7f 7f 7f 0f) — this happens after a previous session
+    # left the pedal in a bad state. A fresh connection or a short pause
+    # usually clears it.
+    open_body = bytes([0x60, 0x20, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) + nb
+    open_r = None
+    for attempt in range(3):
+        g.send(open_body)
+        open_r = g.read_reply(2.0)
+        # success: 60 04 20 ... ; error: 60 03 ...
+        if open_r and len(open_r) >= 3 and open_r[1] == 0x04:
+            break
+        if verbose:
+            print(f"  open attempt {attempt+1}: {hexdump(open_r, 20) if open_r else 'none'}", file=sys.stderr)
+        time.sleep(1.0)
+        g._flush(0.5)
+    if verbose:
+        print(f"  open: {hexdump(open_r, 20) if open_r else 'none'}", file=sys.stderr)
+
     data = bytearray()
-    for _ in range(5000):
+    # The G3Xn's data reply is ASYNCHRONOUS: the data for block N arrives
+    # as the reply to block N+1's ack (60 05 00). So the pattern is:
+    #   send ack → read_reply (gets DATA from previous block)
+    #   send read → read_reply (gets read ack, 17B)
+    #   [data arrives with next ack]
+    #
+    # Block 0: ack → error(7B), read → ack(17B), [data arrives with block 1's ack]
+    # Block 1: ack → DATA(598B), read → ack(17B), [data arrives with block 2's ack]
+    # ...
+    # Last block: ack → DATA(short), read → ack, [no more data]
+    prev_data = None  # data received from previous iteration
+    for blk in range(5000):
+        # Send ack; the reply contains the data for the PREVIOUS block
         g.send(bytes([0x60, 0x05, 0x00]))
-        g.read_reply(1.0)
+        r = g.read_reply(3.0)
+        if r and len(r) >= 8 and r[0] == 0x60 and r[3] == 0x01:
+            raw = r[8:]
+            data.extend(raw)
+            if verbose:
+                print(f"  blk{blk}: got {len(raw)}B total={len(data)}/{fsize}", file=sys.stderr)
+            if len(raw) < 500:  # short block → end of file
+                break
+            if fsize and len(data) >= fsize:
+                break
+        elif blk == 0 and r and len(r) >= 3 and r[1] == 0x03:
+            pass  # block 0 ack always returns error (expected)
+        else:
+            if verbose: print(f"  blk{blk}: unexpected ack reply {hexdump(r,10) if r else 'none'}", file=sys.stderr)
+            break
+        # Send read request; the reply is the read ack (17B)
         g.send(bytes([0x60, 0x22, 0x14, 0x2F, 0x60, 0x00, 0x0C, 0x00, 0x04, 0x00, 0x00, 0x00]))
         g.read_reply(1.0)
-        r = g.read_reply(2.0)
-        if not r or len(r) < 10 or r[0] != 0x60:
-            break
-        if r[4] != 0x04:  # no data entry (r[4] is the status byte)
-            break
-        ln = r[8] | (r[9] << 7)
-        if ln == 0:
-            break
-        packed = r[10:10 + ln + (ln + 6) // 7]
-        data.extend(unpack7(packed, ln))
-    # close
+        time.sleep(0.25)
+    # close + term
     g.send(bytes([0x60, 0x21, 0x40, 0x00, 0x00, 0x00, 0x00]))
     g.read_reply(1.0)
     g.send(bytes([0x60, 0x09]))
@@ -190,37 +232,58 @@ def download(g, name, outp):
     return len(data)
 
 
-def upload(g, name, data: bytes):
+def upload(g, name, data: bytes, verbose=True):
+    """Upload a file to the G3Xn.
+
+    NOTE: the G3Xn write path may be blocked when the pedal is in a degraded
+    state (all writes return 60 03 errors). Reads work fine in that state.
+    The write data is RAW 8-bit (no pack7/crc5), matching the read format.
+    """
     nb = name.encode() + b"\x00"
-    # create
-    g.send(bytes([0x60, 0x24]) + nb)
-    r = g.read_reply(2.0); print("create:", hexdump(r, 40), file=sys.stderr)
+    # create (retry if pedal is in error state: 60 03 7f 7f 7f 7f 0f)
+    create_body = bytes([0x60, 0x24]) + nb
+    r = None
+    for attempt in range(3):
+        g.send(create_body)
+        r = g.read_reply(2.0)
+        # success: 60 04 24 ... ; error: 60 03 ...
+        if r and len(r) >= 3 and r[1] == 0x04:
+            break
+        if verbose: print(f"create attempt {attempt+1}:", hexdump(r, 40), file=sys.stderr)
+        time.sleep(1.0)
+        g._flush(0.5)
+    if verbose: print("create:", hexdump(r, 40), file=sys.stderr)
     # open write (mode 0x01)
     g.send(bytes([0x60, 0x20, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) + nb)
-    r = g.read_reply(2.0); print("open-write:", hexdump(r, 40), file=sys.stderr)
+    r = g.read_reply(2.0)
+    if verbose: print("open-write:", hexdump(r, 40), file=sys.stderr)
     # ack
     g.send(bytes([0x60, 0x05, 0x00]))
-    r = g.read_reply(2.0); print("ack:", hexdump(r, 40), file=sys.stderr)
-    # data blocks
+    r = g.read_reply(2.0)
+    if verbose: print("ack:", hexdump(r, 40), file=sys.stderr)
+    # data blocks (RAW 8-bit, 512-byte chunks)
     BLOCK = 512
     for off in range(0, len(data), BLOCK):
         chunk = data[off:off+BLOCK]
         body = (bytes([0x60, 0x23, 0x40, 0x00, 0x00, 0x00, 0x00])
                 + u14(len(chunk)) + bytes([0x00, 0x00, 0x00])
-                + pack7(chunk) + crc5(chunk))
+                + chunk)
         g.send(body)
         r = g.read_reply(2.0)
         # ack
         g.send(bytes([0x60, 0x05, 0x00]))
         r2 = g.read_reply(2.0)
-        if (off // BLOCK) % 8 == 0:
+        if verbose and (off // BLOCK) % 8 == 0:
             print(f"  block {off//BLOCK}: send-ack={hexdump(r,24)} read-ack={hexdump(r2,24)}", file=sys.stderr)
+        time.sleep(0.25)  # pace like Guitar Lab
     # close
     g.send(bytes([0x60, 0x21, 0x40, 0x00, 0x00, 0x00, 0x00]))
-    r = g.read_reply(2.0); print("close:", hexdump(r, 40), file=sys.stderr)
+    r = g.read_reply(2.0)
+    if verbose: print("close:", hexdump(r, 40), file=sys.stderr)
     # term
     g.send(bytes([0x60, 0x09]))
-    r = g.read_reply(2.0); print("term:", hexdump(r, 40), file=sys.stderr)
+    r = g.read_reply(2.0)
+    if verbose: print("term:", hexdump(r, 40), file=sys.stderr)
 
 
 def main():
@@ -238,7 +301,7 @@ def main():
             r = g.request(bytes([0x60, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00]))
             print("DISK:", hexdump(r))
         elif cmd == "download":
-            n = download(g, sys.argv[2], sys.argv[3])
+            n = download(g, sys.argv[2], sys.argv[3], verbose=True)
             print(f"downloaded {n} bytes -> {sys.argv[3]}")
         elif cmd == "upload":
             data = open(sys.argv[3], "rb").read()
@@ -247,9 +310,13 @@ def main():
             print("upload sequence done")
         elif cmd == "status":
             nb = sys.argv[2].encode() + b"\x00"
-            g.send(bytes([0x60, 0x25]) + nb); g.read_reply(2.0)
-            g.send(bytes([0x60, 0x05, 0x00])); r = g.read_reply(2.0)
-            print("status:", hexdump(r))
+            r = g.request(bytes([0x60, 0x25, 0x00, 0x00]) + nb, 2.0)
+            if r and len(r) >= 30:
+                fsize = int.from_bytes(r[26:30], "little")
+                fname = r[11:23].split(b"\x00")[0].decode("ascii", "replace")
+                print(f"{fname}  size={fsize}")
+            else:
+                print("status:", hexdump(r))
         elif cmd == "raw":
             r = g.request(bytes.fromhex(sys.argv[2]))
             print("reply:", hexdump(r))
