@@ -51,10 +51,12 @@ cp "$FX/build/XXTRVL.ZIC" "$REPO/files/XXTRVL.ZIC"
 echo "=== building G3Xn variant (manifest.g3xn.json) ==="
 ( cd "$SH" && ZOOM_TI_CGT="$ZOOM_TI_CGT" "$PY" tools/zd2_make_effect.py effects/traveler/manifest.g3xn.json )
 cp "$FX/build/XXTRVL.ZD2" "$REPO/files/XXTRVL_g3xn_raw.ZD2"
+mkdir -p "$REPO/files/g3xn"
 cp "$FX/build/XXTRVL.ZIC" "$REPO/files/XXTRVL.ZIC"
+cp "$FX/build/XXTRVL.ZIC" "$REPO/files/g3xn/XXTRVL.ZIC"
 
 echo "=== setting G3Xn target bit (0x91 = MS Plus | g-series) ==="
-python3 "$REPO/tools/set_target.py" "$REPO/files/XXTRVL_g3xn_raw.ZD2" "$REPO/files/XXTRVL_g3xn.ZD2" 0x91
+python3 "$REPO/tools/set_target.py" "$REPO/files/XXTRVL_g3xn_raw.ZD2" "$REPO/files/g3xn/XXTRVL.ZD2" 0x91
 rm -f "$REPO/files/XXTRVL_g3xn_raw.ZD2"
 
 echo ""
