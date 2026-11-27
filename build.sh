@@ -56,7 +56,7 @@ cp "$FX/build/XXTRVL.ZIC" "$REPO/files/XXTRVL.ZIC"
 cp "$FX/build/XXTRVL.ZIC" "$REPO/files/g3xn/XXTRVL.ZIC"
 
 echo "=== setting G3Xn target bit (0x91 = MS Plus | g-series) ==="
-python3 "$REPO/tools/set_target.py" "$REPO/files/XXTRVL_g3xn_raw.ZD2" "$REPO/files/g3xn/XXTRVL.ZD2" 0x91
+python3 "$REPO/tools/retarget_g3xn.py" "$REPO/files/XXTRVL_g3xn_raw.ZD2" "$REPO/files/g3xn/XXTRVL.ZD2" --target 0x07 --group 0x0b --groupname PEDAL
 rm -f "$REPO/files/XXTRVL_g3xn_raw.ZD2"
 
 echo ""
