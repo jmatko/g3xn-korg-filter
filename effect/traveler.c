@@ -53,12 +53,13 @@ extern float _rcpsp(float);
 #define INV720     0.0013888889f
 #define BLOCK_FS   0.000362812f   /* 16/44100 : LFO phase step per block */
 
-/* state layout in instance[2] (32 bytes = 8 floats):
+/* state layout in instance[2] (48 bytes = 12 floats; the guard word lives at word 12, just past it):
  *   [0] x1_L  [1] x2_L  [2] y1_L  [3] y2_L   channel A biquad state
  *   [4] x1_R  [5] x2_R  [6] y1_R  [7] y2_R   channel B biquad state
  *   [8] fc_smooth (Hz)
  *   [9] lfo_phase (radians)
- *   word 4 (bytes 16..19) = SH_STATE_GUARD (set by init)
+ *   (the init guard is at state[SH_STATE_GUARD_WORD] = word state_bytes/4,
+ *    so never use words >= 12)
  */
 
 void SH_AUDIO_FN(void **instance, void **ctx)
@@ -103,13 +104,13 @@ void SH_AUDIO_FN(void **instance, void **ctx)
 
     /* ---- map knobs to physical values ---------------------------------- */
     /* log cutoff: fc = FC_MIN * (FC_MAX/FC_MIN)^cut  (60 .. 8000 Hz) */
-    float u  = tCut * 4.8837755f;        /* cut * ln(8000/60) */
-    float u2 = u * u;
-    float expu = 1.0f + u
-               + u2 * 2.3850746f
-               + u2 * u   * 0.3872120f
-               + u2 * u2  * 0.0471945f
-               + u2 * u2 * u * 0.0045902f;
+    /* exp(u) = (exp(u/4))^4; Taylor to v^6 on v = u/4 in [0, 1.22] (<0.1% err) */
+    float v  = tCut * 1.2209439f;        /* cut * ln(8000/60) / 4 */
+    float v2 = v * v, v3 = v2 * v;
+    float ev = 1.0f + v + v2 * INV2 + v3 * INV6 + v2 * v2 * INV24
+             + v2 * v3 * INV120 + v3 * v3 * INV720;
+    float ev2  = ev * ev;
+    float expu = ev2 * ev2;
     float base = FC_MIN * expu;
 
     float Q    = Q_MIN  + tRes  * (Q_MAX - Q_MIN);

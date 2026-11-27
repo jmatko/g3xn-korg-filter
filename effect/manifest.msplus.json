@@ -8,7 +8,7 @@
   "description": "Resonant low-pass filter emulating the Korg AX1500G / Keio Traveler F-1 (MS20-style VCF). Expression pedal sweeps the cutoff; an optional LFO adds the classic 'traveler' wobble.",
   "dspload": 14,
   "kernel": "traveler.c",
-  "state_bytes": 32,
+  "state_bytes": 48,
   "scaffold": "cleanroom",
   "kernel_section": "text",
   "allow_stack": true,
