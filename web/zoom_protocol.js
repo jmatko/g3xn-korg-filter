@@ -154,7 +154,7 @@
       group: d[0x5F],
       id: u32(0x60),
       name: ascii(0x64, 11),
-      groupname: ascii(0x6D, 11),
+      groupname: ascii(0x6F, 11),
       size: d.length,
     };
   }

@@ -27,13 +27,19 @@
   .kv { display:grid; grid-template-columns:120px 1fr; gap:4px 12px; font-size:13px; }
   .kv span:first-child { color:var(--dim); }
   .big { font-size:15px; font-weight:700; }
+  button.mini { padding:1px 8px; font-size:12px; border-radius:6px; margin-left:8px; }
+  #dlprog { margin-top:10px; }
+  .bar { height:8px; background:#0b0e13; border-radius:4px; overflow:hidden; margin-top:6px; }
+  .bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .2s; }
+  #dlreport { margin-top:10px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; background:#0b0e13; border-radius:8px; padding:10px; white-space:pre; overflow:auto; max-height:260px; display:none; }
+  .lhead { color:var(--dim); font-size:11.5px; padding:0 4px 4px; }
   hr { border:0; border-top:1px solid #262c38; margin:12px 0; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>G3Xn Upload Verify</h1>
-  <div class="sub">Read back the Traveler filter that was just uploaded. Connect the pedal, then run the checks. (Read-only — this page never writes.)</div>
+  <div class="sub">Read back, download and compare effect files on the pedal. Connect, then run the checks. Downloads are read-only; steps 4–5 and Delete write to the pedal.</div>
 
   <div class="card">
     <div class="row">
@@ -51,10 +57,30 @@
       <button id="disk" class="ghost" disabled>Disk usage</button>
     </div>
     <div class="row" style="margin-top:10px">
+      <button id="dlpick" class="ghost" disabled>Select all .ZD2</button>
+      <button id="dlsel" disabled>Download selected</button>
+      <button id="dlzd2" disabled>Download all .ZD2 (zip)</button>
+      <button id="dlcancel" class="danger" disabled>Cancel</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="dlname" placeholder="PDL_VOL.ZD2" maxlength="12" style="background:#0f1319;color:var(--fg);border:1px solid #2a3140;border-radius:8px;padding:8px;width:160px;font-family:ui-monospace,monospace">
+      <button id="dlbyname" class="ghost" disabled>Download by name</button>
+      <span class="dim" style="font-size:12.5px">for a file that is not in the list, or to grab one effect without listing first</span>
+    </div>
+    <div id="dlprog" class="dim" style="display:none"><span id="dltext"></span><div class="bar"><i id="dlbar"></i></div></div>
+    <div id="dlreport"></div>
+    <div class="row" id="dlreportrow" style="margin-top:8px; display:none">
+      <button id="dlreportcopy" class="ghost">Copy ZD2 header report</button>
+      <span class="dim" style="font-size:12.5px">size, group, id, target, version and CRC of each downloaded .ZD2</span>
+    </div>
+    <div class="row" style="margin-top:10px">
       <button id="delselected" class="danger" disabled>Delete selected</button>
       <label class="dim" style="font-size:12.5px"><input type="checkbox" id="delsafe" checked> protect stock/system files (never delete *.ZT2, FLST_SEQ, *.ZIR, *.ZIC)</label>
     </div>
-    <div id="filelist" class="dim" style="margin-top:12px">file list appears here — check the boxes to select, then Delete selected</div>
+    <div id="filelist" class="dim" style="margin-top:12px">file list appears here. First box = download, second box = delete (protected files can't be deleted).</div>
+    <div class="row" style="margin-top:10px">
+      <label class="dim" style="font-size:12.5px">optional: expected file to byte-compare in step 3 &nbsp;<input type="file" id="expectedfile"></label>
+    </div>
     <div id="result" style="margin-top:12px"></div>
   </div>
 
@@ -168,28 +194,37 @@ async function deleteFile(name){
   return r;
 }
 
-async function downloadFile(name){
+// opts: { onProgress(bytesSoFar), shouldCancel() }. If cancelled the pedal-side file
+// handle is still closed properly, then Error('cancelled') is thrown.
+async function downloadFile(name, opts){
+  opts = opts || {};
   const c = new TextEncoder().encode(name + '\x00');
   if(!await fileExists(name)) throw new Error('file not found on pedal: '+name);
   await request(new Uint8Array([0x60,0x20,0x02,0,0,0,0,0,0,0,0,0, ...c]));
   const chunks = [];
-  let guard = 0;
-  while(guard++ < 5000){
-    await request(new Uint8Array([0x60,0x05,0x00]));
-    await request(new Uint8Array([0x60,0x22,0x14,0x2F,0x60,0x00,0x0C,0x00,0x04,0x00,0x00,0x00]));
-    const r = await request(new Uint8Array([0x60,0x05,0x00]));
-    if(!r || r[4]!==0x04) break;
-    const n = (r[9]<<7) | r[8];
-    if(n===0) break;
-    const packed = r.slice(10, 10+n+Math.ceil(n/7));
-    const raw = P.unpack7(packed, n);
-    chunks.push(raw);
-  }
+  let guard = 0, got = 0, cancelled = false, failure = null;
+  try{
+    while(guard++ < 5000){
+      if(opts.shouldCancel && opts.shouldCancel()){ cancelled = true; break; }
+      await request(new Uint8Array([0x60,0x05,0x00]));
+      await request(new Uint8Array([0x60,0x22,0x14,0x2F,0x60,0x00,0x0C,0x00,0x04,0x00,0x00,0x00]));
+      const r = await request(new Uint8Array([0x60,0x05,0x00]));
+      if(!r || r[4]!==0x04) break;
+      const n = (r[9]<<7) | r[8];
+      if(n===0) break;
+      const packed = r.slice(10, 10+n+Math.ceil(n/7));
+      const raw = P.unpack7(packed, n);
+      chunks.push(raw); got += raw.length;
+      if(opts.onProgress) opts.onProgress(got);
+    }
+  }catch(e){ failure = e; }
+  // always release the file handle on the pedal
   await request(new Uint8Array([0x60,0x21,0x40,0x00,0x00,0x00,0x00])).catch(()=>{});
   await request(new Uint8Array([0x60,0x09])).catch(()=>{});
-  let total = chunks.reduce((s,c)=>s+c.length,0);
-  const out = new Uint8Array(total);
-  let off=0; for(const c of chunks){ out.set(c,off); off+=c.length; }
+  if(failure) throw failure;
+  if(cancelled) throw new Error('cancelled');
+  const out = new Uint8Array(got);
+  let off=0; for(const c2 of chunks){ out.set(c2,off); off+=c2.length; }
   return out;
 }
 
@@ -280,7 +315,7 @@ $('connect').onclick = async ()=>{
     // also listen on output in case replies come back on the same port
     out.onmidimessage = onMidi;
     setConn('connected: '+out.name, 'ok');
-    ['list','download','verify','disk','delselected','seqload','seqbackup','upload'].forEach(id=>$(id).disabled=false);
+    ['list','download','verify','disk','delselected','seqload','seqbackup','upload','dlpick','dlsel','dlzd2','dlbyname'].forEach(id=>$(id).disabled=false);
     log('connected to ' + out.name);
   }catch(e){ setConn('error: '+e.message, 'err'); log('connect error: '+e.message); }
 };
@@ -295,15 +330,21 @@ $('list').onclick = async ()=>{
   try{
     filelistEl.innerHTML=''; filelistEl.className='dim';
     const names = await listFiles();
+    window._names = names;
     names.forEach(n=>{
       const d=document.createElement('div');
-      const cb=document.createElement('input'); cb.type='checkbox'; cb.className='delcb'; cb.value=n;
+      const dcb=document.createElement('input'); dcb.type='checkbox'; dcb.className='dlcb'; dcb.value=n; dcb.title='download';
+      d.appendChild(dcb);
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.className='delcb'; cb.value=n; cb.title='delete'; cb.style.marginLeft='6px';
       const prot = isProtected(n);
       if(prot){ cb.disabled=true; cb.title='protected system file'; }
       d.appendChild(cb);
       const label=document.createElement('span'); label.style.marginLeft='8px';
       label.textContent = (n==='XXTRVL.ZD2'?'★ ':'') + n + (prot?'  (protected)':'');
       d.appendChild(label);
+      const one=document.createElement('button'); one.className='mini ghost'; one.textContent='⬇'; one.title='download '+n;
+      one.onclick=()=>runDownload([n]);
+      d.appendChild(one);
       if(n==='XXTRVL.ZD2') d.className='hit';
       filelistEl.appendChild(d);
     });
@@ -370,9 +411,9 @@ $('verify').onclick = async ()=>{
       detail = ok ? `byte-identical (${a.length} bytes)` : (firstDiff>=0?`size ok but differ at byte ${firstDiff}`:`size mismatch got ${a.length} vs ${b.length}`);
     } else {
       const h = P.parseZd2Header(got);
-      ok = h && h.name==='Traveler' && h.group===0x02 && (h.id>>>0)===0x02001010 && got.length===8017;
+      ok = h && h.name==='Traveler' && ((h.id>>>0)&0xffff)===0x1010 && got.length===8017;
       detail = ok
-        ? `header matches (Traveler, group 0x02, id 0x02001010, 8017 B)`
+        ? `header matches (Traveler, id low16 0x1010, group 0x${h.group.toString(16).padStart(2,'0')}, target 0x${h.target.toString(16)}, 8017 B)`
         : `header mismatch: ${JSON.stringify(h)}`;
     }
     $('result').innerHTML = `<div class="big ${ok?'ok':'err'}">${ok?'✔ UPLOAD VERIFIED — Traveler filter is on the pedal':'✘ VERIFY FAILED'}</div><div class="dim" style="margin-top:6px">${detail}</div>`;
@@ -553,6 +594,139 @@ $('seqbackup').onclick = async ()=>{
     log('backup error: ' + e.message);
     $('seqresult').innerHTML = '<span class="err">backup failed: ' + e.message + '</span>';
   }finally{ btn.disabled = false; }
+};
+
+
+// ---- Bulk / selective downloads --------------------------------------------
+const CRC_T = (()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n]=c>>>0; } return t; })();
+function crc32(buf, start=0, end=buf.length){ let c=0xFFFFFFFF; for(let i=start;i<end;i++) c = CRC_T[(c^buf[i])&0xFF] ^ (c>>>8); return (c^0xFFFFFFFF)>>>0; }
+
+// Minimal store-only (uncompressed) ZIP writer.
+function makeZip(files){
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  const now = new Date();
+  const dosTime = (now.getHours()<<11) | (now.getMinutes()<<5) | (now.getSeconds()>>1);
+  const dosDate = ((now.getFullYear()-1980)<<9) | ((now.getMonth()+1)<<5) | now.getDate();
+  const u16=(v)=>[v&255,(v>>>8)&255], u32=(v)=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+  for(const f of files){
+    const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+    const local = new Uint8Array([0x50,0x4b,0x03,0x04, ...u16(20), ...u16(0x0800), ...u16(0), ...u16(dosTime), ...u16(dosDate),
+      ...u32(crc), ...u32(size), ...u32(size), ...u16(name.length), ...u16(0)]);
+    parts.push(local, name, f.data);
+    central.push(new Uint8Array([0x50,0x4b,0x01,0x02, ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(dosTime), ...u16(dosDate),
+      ...u32(crc), ...u32(size), ...u32(size), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset)]), name);
+    offset += local.length + name.length + size;
+  }
+  const cdSize = central.reduce((a,b)=>a+b.length,0);
+  const end = new Uint8Array([0x50,0x4b,0x05,0x06, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  const all = [...parts, ...central, end];
+  const out = new Uint8Array(all.reduce((a,b)=>a+b.length,0));
+  let o=0; for(const b of all){ out.set(b,o); o+=b.length; }
+  return out;
+}
+
+function stampFile(prefix, ext){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return prefix+'_'+d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes())+'-'+p(d.getSeconds())+ext;
+}
+
+const DL_BUTTONS = ['list','download','verify','disk','delselected','seqload','seqbackup','upload','dlpick','dlsel','dlzd2','dlbyname'];
+let dlCancel = false, dlBusy = false;
+function setDlBusy(b){
+  dlBusy = b;
+  DL_BUTTONS.forEach(id=>{ $(id).disabled = b || !port; });
+  $('dlcancel').disabled = !b;
+  document.querySelectorAll('#filelist button.mini').forEach(x=>x.disabled=b);
+}
+
+function zd2Report(name, data){
+  const h = P.parseZd2Header(data);
+  if(!h) return {name, size:data.length, line: name.padEnd(13)+String(data.length).padStart(7)+'  NOT A ZD2 (magic '+Array.from(data.slice(0,4)).map(b=>b.toString(16).padStart(2,'0')).join('')+')'};
+  const crcOk = (h.checksum>>>0) === ((crc32(data,12,data.length-16) ^ 0xFFFFFFFF)>>>0);
+  const hx=(v,w)=>'0x'+(v>>>0).toString(16).padStart(w,'0');
+  return {name, size:data.length, h, line:
+    name.padEnd(13)+String(data.length).padStart(7)+'  grp '+hx(h.group,2)+' '+(h.groupname||'').padEnd(11)+' id '+hx(h.id,8)+'  tgt '+hx(h.target,2)+'  v'+h.version.padEnd(5)+' '+(h.name||'').padEnd(11)+' crc '+(crcOk?'ok':'BAD')};
+}
+
+// Download one or more files. 1 file -> saved as-is; several -> one ZIP.
+async function runDownload(names, zipPrefix){
+  if(dlBusy || !names.length) return;
+  dlCancel = false; setDlBusy(true);
+  const prog=$('dlprog'), txt=$('dltext'), bar=$('dlbar');
+  prog.style.display='block'; $('dlreport').style.display='none'; $('dlreportrow').style.display='none';
+  const got = [], failed = [], reports = [];
+  const t0 = Date.now();
+  try{
+    for(let i=0;i<names.length;i++){
+      if(dlCancel) break;
+      const n = names[i];
+      const label = '['+(i+1)+'/'+names.length+'] '+n;
+      txt.textContent = label+' …'; bar.style.width = (i/names.length*100)+'%';
+      try{
+        const data = await downloadFile(n, {
+          shouldCancel: ()=>dlCancel,
+          onProgress: b=>{ txt.textContent = label+'  '+b+' B'; }
+        });
+        got.push({name:n, data});
+        if(/\.ZD2$/i.test(n)) reports.push(zd2Report(n, data));
+        log('downloaded '+n+' ('+data.length+' B)');
+      }catch(e){
+        if(e.message==='cancelled'){ dlCancel = true; break; }
+        failed.push(n+' ('+e.message+')'); log('download '+n+' error: '+e.message);
+      }
+    }
+    bar.style.width = '100%';
+    const secs = Math.round((Date.now()-t0)/1000);
+    if(got.length === 1 && names.length === 1){
+      saveBlob(got[0].data, got[0].name);
+    } else if(got.length){
+      const zname = stampFile(zipPrefix || 'G3Xn_files', '.zip');
+      saveBlob(makeZip(got), zname);
+      log('saved '+zname+' ('+got.length+' files)');
+    }
+    if(reports.length){
+      const hdr = 'name'.padEnd(13)+'  size'.padEnd(9)+'  group / id / target / version / internal name / CRC\n';
+      $('dlreport').textContent = hdr + reports.map(r=>r.line).join('\n');
+      $('dlreport').style.display='block'; $('dlreportrow').style.display='flex';
+      window._dlReport = $('dlreport').textContent;
+    }
+    txt.textContent = (dlCancel?'cancelled — ':'done — ')+got.length+' file(s) saved'+(failed.length?', '+failed.length+' failed':'')+' in '+secs+' s';
+    $('result').innerHTML = `<div class="big ${failed.length||!got.length?'err':'ok'}">${got.length} file(s) downloaded${dlCancel?' (cancelled early; partial set saved)':''}</div>`
+      + (failed.length?`<div class="err" style="margin-top:6px">failed: ${failed.join('; ')}</div>`:'');
+  }catch(e){
+    txt.textContent = 'error: '+e.message; log('download error: '+e.message);
+  }finally{ setDlBusy(false); }
+}
+
+$('dlcancel').onclick = ()=>{ dlCancel = true; $('dltext').textContent += '  (cancelling after current chunk…)'; };
+$('dlpick').onclick = ()=>{ filelistEl.querySelectorAll('input.dlcb').forEach(cb=>{ cb.checked = /\.ZD2$/i.test(cb.value); }); };
+$('dlsel').onclick = ()=>{
+  const names=[...filelistEl.querySelectorAll('input.dlcb:checked')].map(c=>c.value);
+  if(!names.length){ $('result').innerHTML='<span class="err">tick the download box on at least one file (or press Select all .ZD2)</span>'; return; }
+  runDownload(names, 'G3Xn_selected');
+};
+$('dlzd2').onclick = async ()=>{
+  try{
+    let names = window._names;
+    if(!names){ txt_status('listing files …'); names = await listFiles(); window._names = names; }
+    const zd2 = names.filter(n=>/\.ZD2$/i.test(n));
+    if(!zd2.length){ $('result').innerHTML='<span class="err">no .ZD2 files found on the pedal</span>'; return; }
+    if(zd2.length>20 && !confirm(zd2.length+' effect files will be read one at a time. With a slow pedal this can take many minutes (you can Cancel; partial results are still saved). Continue?')) return;
+    runDownload(zd2, 'G3Xn_ZD2');
+  }catch(e){ log('download-all error: '+e.message); $('result').innerHTML='<span class="err">error: '+e.message+'</span>'; }
+};
+function txt_status(t){ const p=$('dlprog'); p.style.display='block'; $('dltext').textContent=t; }
+$('dlbyname').onclick = ()=>{
+  const n = $('dlname').value.trim();
+  if(!n){ $('result').innerHTML='<span class="err">type a filename first</span>'; return; }
+  runDownload([n]);
+};
+$('dlreportcopy').onclick = ()=>{ navigator.clipboard.writeText(window._dlReport||''); };
+$('expectedfile').onchange = async (e)=>{
+  const f=e.target.files[0]; if(!f){ window._expected=null; return; }
+  window._expected = new Uint8Array(await f.arrayBuffer());
+  log('expected file loaded: '+f.name+' ('+window._expected.length+' B)');
 };
 
 $('copylog').onclick = ()=>{ navigator.clipboard.writeText(logEl.textContent); };
