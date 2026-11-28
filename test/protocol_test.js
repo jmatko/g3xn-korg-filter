@@ -32,8 +32,8 @@ t('crc32("123456789")=0xcbf43926', P.crc32(new TextEncoder().encode('123456789')
 const zd2Path = path.join(__dirname, '..', 'files', 'g3xn', 'XXTRVL.ZD2');
 if (fs.existsSync(zd2Path)) {
   const h = P.parseZd2Header(new Uint8Array(fs.readFileSync(zd2Path)));
-  t('ZD2 header (Traveler / group 0x02 / id 0x02001010)',
-    h.name === 'Traveler' && h.group === 0x02 && h.id === 0x02001010);
+  t('ZD2 header (Traveler / group 0x0b PEDAL / id 0x0b001010)',
+    h.name === 'Traveler' && h.group === 0x0b && h.id === 0x0b001010);
 } else {
   console.log('  SKIP ZD2 header (file not found)');
 }

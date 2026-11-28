@@ -57,8 +57,8 @@ v7.2.11 build. Ask the original author, or install the TI C6000 CGT for Linux.)
 ```bash
 ./build.sh
 ```
-This produces `files/g3xn/XXTRVL.ZD2` (G3Xn, group 0x02 FILTER) and
-`files/XXTRVL_msplus.ZD2` (MS Plus).
+This produces `files/g3xn/XXTRVL.ZD2` (G3Xn, retargeted to PEDAL group 0x0b)
+and `files/msplus/XXTRVL.ZD2` (MS Plus).
 
 ## Inspecting a real G3Xn (to confirm the target bit)
 
