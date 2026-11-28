@@ -45,17 +45,17 @@ PY="$SH/.venv/bin/python3"
 
 echo "=== building MS Plus variant (manifest.json) ==="
 ( cd "$SH" && ZOOM_TI_CGT="$ZOOM_TI_CGT" "$PY" tools/zd2_make_effect.py effects/traveler/manifest.json )
-cp "$FX/build/XXTRVL.ZD2" "$REPO/files/XXTRVL_msplus.ZD2"
-cp "$FX/build/XXTRVL.ZIC" "$REPO/files/XXTRVL.ZIC"
+mkdir -p "$REPO/files/msplus"
+cp "$FX/build/XXTRVL.ZD2" "$REPO/files/msplus/XXTRVL.ZD2"
+cp "$FX/build/XXTRVL.ZIC" "$REPO/files/msplus/XXTRVL.ZIC"
 
 echo "=== building G3Xn variant (manifest.g3xn.json) ==="
 ( cd "$SH" && ZOOM_TI_CGT="$ZOOM_TI_CGT" "$PY" tools/zd2_make_effect.py effects/traveler/manifest.g3xn.json )
 cp "$FX/build/XXTRVL.ZD2" "$REPO/files/XXTRVL_g3xn_raw.ZD2"
 mkdir -p "$REPO/files/g3xn"
-cp "$FX/build/XXTRVL.ZIC" "$REPO/files/XXTRVL.ZIC"
 cp "$FX/build/XXTRVL.ZIC" "$REPO/files/g3xn/XXTRVL.ZIC"
 
-echo "=== converting to G3Xn stock layout (target/group/icon/INFO/pedal flag) ==="
+echo "=== converting G3Xn variant to stock G3Xn layout (target 0x07, PEDAL 0x0b, BMP icon, INFO, pedal flag) ==="
 python3 "$REPO/tools/to_g3xn_format.py" "$REPO/files/XXTRVL_g3xn_raw.ZD2" "$REPO/files/g3xn/XXTRVL.ZD2"
 rm -f "$REPO/files/XXTRVL_g3xn_raw.ZD2"
 
@@ -63,5 +63,5 @@ echo ""
 echo "Done. Files in $REPO/files/ :"
 ls -la "$REPO/files/"
 echo ""
-echo "NOTE: the G3Xn target bit (0x91) is a best-guess. Verify it against a"
-echo "stock G3Xn ZD2 with:  python3 tools/g3xn_inspect.py LOWPASSF.ZD2"
+echo "NOTE: G3Xn target 0x07 + PEDAL group 0x0b and the stock layout (BMP icon, INFO,"
+echo "header block) come from the 162 stock G3Xn effects and PDL_REV/PDL_BITC. See notes/08."
