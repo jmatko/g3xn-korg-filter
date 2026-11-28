@@ -209,11 +209,19 @@ async function downloadFile(name, opts){
       await request(new Uint8Array([0x60,0x05,0x00]));
       await request(new Uint8Array([0x60,0x22,0x14,0x2F,0x60,0x00,0x0C,0x00,0x04,0x00,0x00,0x00]));
       const r = await request(new Uint8Array([0x60,0x05,0x00]));
-      if(!r || r[4]!==0x04) break;
-      const n = (r[9]<<7) | r[8];
+      // Reply body (F0 52 00 6E stripped), confirmed from a real G3Xn log:
+      //   [0]=60 [1]=status(04=data) [2]=22 [3..4] [5..6]=length u14 (lo,hi) [7..]=pack7 data, then 5-byte CRC
+      if(!r || r[1]!==0x04) break;
+      const n = (r[6]<<7) | r[5];
       if(n===0) break;
-      const packed = r.slice(10, 10+n+Math.ceil(n/7));
+      const packedLen = n + Math.ceil(n/7);
+      const packed = r.slice(7, 7+packedLen);
       const raw = P.unpack7(packed, n);
+      if(raw.length !== n) throw new Error('short block: expected '+n+' B, got '+raw.length+' (reply '+r.length+' B)');
+      // CRC: last 5 bytes of the reply, 7-bit groups low-first, stored inverted
+      const L = r.length;
+      const stored = (r[L-5] | (r[L-4]<<7) | (r[L-3]<<14) | (r[L-2]<<21) | ((r[L-1]&0x0F)<<28)) >>> 0;
+      if(((stored ^ 0xFFFFFFFF)>>>0) !== P.crc32(raw)) throw new Error('checksum mismatch on block '+chunks.length+' of '+name);
       chunks.push(raw); got += raw.length;
       if(opts.onProgress) opts.onProgress(got);
     }
